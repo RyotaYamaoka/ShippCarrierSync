@@ -61,7 +61,24 @@ function decide(schedule, todayStr, lastApply) {
   return { run: false, reason: '本日は実行日ではありません', targetApply: null };
 }
 
-module.exports = { fetchSchedule, decide, ymd };
+// 公開ページからセット日・適用日の年間表を取得（メール本文等の表示用）
+async function fetchScheduleTable() {
+  const res = await fetch(SCHEDULE_URL, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!res.ok) throw new Error(`スケジュールページ取得失敗: HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const plain = new TextDecoder('shift_jis').decode(buf).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const setDates = [...(plain.split('セット日')[1] || '').matchAll(/(\d{1,2})月(\d{1,2})日/g)].slice(0, 12);
+  const applyDates = [...(plain.split('適用日')[1] || '').matchAll(/(\d{1,2})月(\d{1,2})日/g)].slice(0, 12);
+  const rows = [];
+  for (let i = 0; i < 12; i++) {
+    const s = setDates[i], a = applyDates[i];
+    // 月度はセット日の月に一致（5月度=5/26セット, 9月度=9/26セット 等）
+    rows.push({ label: s ? `${+s[1]}月度` : '', setDate: s ? s[0] : '', applyDate: a ? a[0] : '' });
+  }
+  return rows;
+}
+
+module.exports = { fetchSchedule, fetchScheduleTable, decide, ymd };
 
 // 単体実行: スケジュールと本日の判定を表示
 if (require.main === module) {

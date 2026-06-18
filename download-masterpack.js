@@ -90,7 +90,19 @@ async function downloadMasterpack() {
     console.log('      サイズ   :', (size / 1024).toFixed(1), 'KB');
     console.log('      前回比   :', changed ? '内容が更新されています' : '⚠ 前回と同一（まだ更新されていない可能性）');
 
-    return { savePath, filename, sizeKB: +(size / 1024).toFixed(1), changed };
+    const result = { savePath, filename, sizeKB: +(size / 1024).toFixed(1), changed };
+
+    // ダウンロード完了通知メール（ベストエフォート：失敗してもDLは成功扱い）
+    try {
+      const { fetchScheduleTable } = require('./check-schedule');
+      const { sendDownloadNotification } = require('./notify');
+      const scheduleTable = await fetchScheduleTable();
+      await sendDownloadNotification({ result, scheduleTable, destLabel: process.env.MAIL_DEST_LABEL });
+    } catch (e) {
+      console.log('[notify] メール送信に失敗（DLは成功）:', e.message);
+    }
+
+    return result;
   } finally {
     await browser.close();
   }
