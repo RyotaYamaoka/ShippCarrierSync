@@ -42,14 +42,18 @@ async function sendDownloadNotification({ result, scheduleTable, destLabel }) {
     (scheduleTable || []).map(r => [r.label, r.setDate, r.applyDate])
   );
 
+  const changedText = result.changed ? '更新あり' : '⚠ 前回と同一（まだ更新されていない可能性）';
+  const dest = destLabel || '(コンテナ内 /app/downloads)';
+
+  // プレーンテキスト版（HTML非対応クライアント用）
   const body =
 `ヤマトビジネスメンバーズのマスタパックをダウンロードしました。
 
   日時      : ${now}
   ファイル  : ${result.filename}
   サイズ    : ${result.sizeKB} KB
-  保存先    : ${destLabel || '(コンテナ内 /app/downloads)'}
-  更新有無  : ${result.changed ? '更新あり' : '⚠ 前回と同一（まだ更新されていない可能性）'}
+  保存先    : ${dest}
+  更新有無  : ${changedText}
 
 ── マスタ更新スケジュール（セット日・適用日）──
 ${tableText}
@@ -57,11 +61,37 @@ ${tableText}
 ※ 取得は「適用日の前日」に自動実行されます（スケジュールは変更される場合があります）。
 `;
 
+  // HTML版
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const td = 'style="border:1px solid #ccc;padding:4px 10px;"';
+  const th = 'style="border:1px solid #ccc;padding:4px 10px;background:#f3f3f3;text-align:center;"';
+  const rowsHtml = (scheduleTable || []).map(r =>
+    `<tr><td ${td}>${esc(r.label)}</td><td ${td} align="center">${esc(r.setDate)}</td><td ${td} align="center">${esc(r.applyDate)}</td></tr>`
+  ).join('');
+  const html =
+`<div style="font-family:'Segoe UI',Meiryo,sans-serif;font-size:14px;color:#333;">
+  <p>ヤマトビジネスメンバーズのマスタパックをダウンロードしました。</p>
+  <table style="border-collapse:collapse;margin:8px 0;">
+    <tr><td ${td}>日時</td><td ${td}>${esc(now)}</td></tr>
+    <tr><td ${td}>ファイル</td><td ${td}>${esc(result.filename)}</td></tr>
+    <tr><td ${td}>サイズ</td><td ${td}>${esc(String(result.sizeKB))} KB</td></tr>
+    <tr><td ${td}>保存先</td><td ${td}>${esc(dest)}</td></tr>
+    <tr><td ${td}>更新有無</td><td ${td}>${esc(changedText)}</td></tr>
+  </table>
+  <p style="margin:14px 0 6px;font-weight:bold;">マスタ更新スケジュール（セット日・適用日）</p>
+  <table style="border-collapse:collapse;">
+    <tr><th ${th}>月度</th><th ${th}>セット日</th><th ${th}>適用日</th></tr>
+    ${rowsHtml}
+  </table>
+  <p style="color:#888;font-size:12px;margin-top:14px;">※ 取得は「適用日の前日」に自動実行されます（スケジュールは変更される場合があります）。</p>
+</div>`;
+
   await transporter.sendMail({
     from: MAIL_FROM || SMTP_USER,
     to: MAIL_TO,
     subject: `【SHIPP】ヤマト マスタパックDL完了 ${result.filename}（${now}）`,
     text: body,
+    html,
   });
 
   console.log(`[notify] ダウンロード通知メールを送信: ${MAIL_TO}`);

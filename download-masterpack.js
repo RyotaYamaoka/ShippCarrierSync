@@ -31,6 +31,16 @@ function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+// 退避ファイル名用の YYYYMMDD_HHMMSS（JST）
+function stampJST(d) {
+  const p = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(d);
+  const g = t => p.find(x => x.type === t).value;
+  return `${g('year')}${g('month')}${g('day')}_${g('hour')}${g('minute')}${g('second')}`;
+}
+
 // マスタパックをダウンロードして downloads/ に保存。
 // 戻り値: { savePath, filename, sizeKB, changed } changed=前回と中身が変わったか
 async function downloadMasterpack() {
@@ -77,6 +87,15 @@ async function downloadMasterpack() {
 
     // ダウンロード前のハッシュ（更新検証用）
     const prevHash = fs.existsSync(savePath) ? sha256(savePath) : null;
+
+    // 既存ファイルは上書きせず、旧ファイルの取得日時を付けて退避（残す）
+    if (fs.existsSync(savePath)) {
+      const ext = path.extname(filename);
+      const base = path.basename(filename, ext);
+      const archived = path.join(DOWNLOAD_DIR, `${base}_${stampJST(fs.statSync(savePath).mtime)}${ext}`);
+      fs.renameSync(savePath, archived);
+      console.log('      旧ファイルを退避:', path.basename(archived));
+    }
     await download.saveAs(savePath);
 
     const size = fs.statSync(savePath).size;
