@@ -1,9 +1,16 @@
 # イメージに含めない（秘密情報・ローカル生成物・OS依存のnode_modules）
+# サブフォルダ(yamato/ seino/)も対象にするため **/ も併記
 .env
+**/.env
 auth-state.json
+**/auth-state.json
 state.json
+**/state.json
 node_modules
 downloads
+**/downloads
 .git
 *.png
+**/*.png
 *.log
+**/*.log

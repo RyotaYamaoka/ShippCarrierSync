@@ -11,5 +11,5 @@ RUN npm ci --omit=dev
 # アプリ本体
 COPY . .
 
-# 既定はcron入口。動作確認時は `docker run ... node download-masterpack.js` で上書き
-CMD ["node", "daily.js"]
+# 既定はヤマトのcron入口。動作確認時は `docker run ... node yamato/download-masterpack.js` で上書き
+CMD ["node", "yamato/daily.js"]

@@ -14,8 +14,8 @@ docker run --rm \
   -e PW_NO_SANDBOX=1 \
   -e MAIL_DEST_LABEL="$DEST" \
   --env-file .env \
-  -v "$DEST:/app/downloads" \
-  "$IMAGE" node download-masterpack.js
+  -v "$DEST:/app/yamato/downloads" \
+  "$IMAGE" node yamato/download-masterpack.js
 
 # コンテナはroot実行なので、出力ファイルを ec2-user に揃える
 sudo chown -R ec2-user:ec2-user "$DEST"
