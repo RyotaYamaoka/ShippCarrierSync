@@ -37,7 +37,14 @@ async function downloadMasterpack() {
   if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
   // EC2(Linux)では画面が無いので headless がデフォルト。ローカルで見たい時は HEADLESS=false
-  const browser = await chromium.launch({ headless: process.env.HEADLESS !== 'false' });
+  // コンテナ内では PW_NO_SANDBOX=1 を付ける（root実行のsandbox問題・/dev/shm不足対策）
+  const launchArgs = process.env.PW_NO_SANDBOX === '1'
+    ? ['--no-sandbox', '--disable-dev-shm-usage']
+    : [];
+  const browser = await chromium.launch({
+    headless: process.env.HEADLESS !== 'false',
+    args: launchArgs,
+  });
   try {
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();

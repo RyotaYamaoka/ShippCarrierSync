@@ -1,0 +1,9 @@
+# イメージに含めない（秘密情報・ローカル生成物・OS依存のnode_modules）
+.env
+auth-state.json
+state.json
+node_modules
+downloads
+.git
+*.png
+*.log
