@@ -31,6 +31,21 @@ function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+// 退避ファイルの保持世代数（これより古いものは削除）
+const RETAIN_GENERATIONS = Number(process.env.RETAIN_GENERATIONS || 12);
+
+// 退避ファイル（base_YYYYMMDD_HHMMSS.ext）を新しい順に keep 個だけ残し、古いものを削除
+function pruneArchives(dir, filename, keep) {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  const re = new RegExp(`^${base}_\\d{8}_\\d{6}${ext.replace(/\./g, '\\.')}$`);
+  const archives = fs.readdirSync(dir).filter(f => re.test(f)).sort(); // 名前昇順=古い順
+  for (let i = 0; i < archives.length - keep; i++) {
+    fs.unlinkSync(path.join(dir, archives[i]));
+    console.log('      古い退避を削除:', archives[i]);
+  }
+}
+
 // 退避ファイル名用の YYYYMMDD_HHMMSS（JST）
 function stampJST(d) {
   const p = new Intl.DateTimeFormat('en-CA', {
@@ -97,6 +112,9 @@ async function downloadMasterpack() {
       console.log('      旧ファイルを退避:', path.basename(archived));
     }
     await download.saveAs(savePath);
+
+    // 退避ファイルは最新 RETAIN_GENERATIONS 世代のみ保持し、古いものを削除
+    pruneArchives(DOWNLOAD_DIR, filename, RETAIN_GENERATIONS);
 
     const size = fs.statSync(savePath).size;
     if (size === 0) throw new Error('ダウンロードしたファイルのサイズが0です。');
