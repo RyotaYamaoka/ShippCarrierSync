@@ -1,0 +1,12 @@
+# 秘密情報・実行時生成物（絶対にコミットしない）
+.env
+auth-state.json
+state.json
+node_modules/
+downloads/
+
+# 調査時のスクリーンショット（ログイン後画面が写るため除外）
+*.png
+
+# ログ
+*.log
