@@ -135,7 +135,11 @@ async function seinoLogin(page) {
         zip.extractAllTo(DOWNLOAD_DIR, true); // 既存は上書き
         fs.unlinkSync(savePath);
         console.log(`      解凍 -> ${entries.join(', ')}（zip削除）`);
-        saved.push({ fn, extracted: entries });
+        const extracted = entries.map(e => ({
+          name: e,
+          mb: (fs.statSync(path.join(DOWNLOAD_DIR, e)).size / 1024 / 1024).toFixed(1),
+        }));
+        saved.push({ fn, extracted });
       } catch (e) {
         console.log('      !! 解凍失敗（zipは残す）:', e.message);
         saved.push({ fn, extracted: [] });
@@ -143,6 +147,14 @@ async function seinoLogin(page) {
       await dl.waitForTimeout(1500);
     }
     console.log(`[完了] ${saved.length}/${TARGETS.length} 件 取得`);
+
+    // ダウンロード完了通知メール（ベストエフォート）
+    try {
+      const { sendDownloadNotification } = require('./notify');
+      await sendDownloadNotification({ saved, destLabel: process.env.MAIL_DEST_LABEL });
+    } catch (e) {
+      console.log('[notify] メール送信に失敗（DLは成功）:', e.message);
+    }
   } finally {
     // セッションを溜めないため、成功/失敗どちらでも必ずログアウトする
     if (context && page) {

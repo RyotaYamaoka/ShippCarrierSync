@@ -12,6 +12,7 @@ mkdir -p "$DEST"
 echo "[seino] 保存先: $DEST"
 docker run --rm \
   -e PW_NO_SANDBOX=1 \
+  -e MAIL_DEST_LABEL="$DEST" \
   --env-file .env \
   -v "$DEST:/app/seino/downloads" \
   "$IMAGE" node seino/download-master.js
