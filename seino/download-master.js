@@ -21,7 +21,8 @@ async function clickLoginImage(frame) {
   });
 }
 
-async function seinoLogin(page) {
+// ID/パスワードでログインを1回試行。KEYNO(シリアル)セットアップ画面が出たら登録して true を返す。
+async function attemptLogin(page) {
   await page.goto(process.env.LOGIN_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
   let frame = page.frame({ name: 'loginFRAME' });
@@ -31,16 +32,27 @@ async function seinoLogin(page) {
   await Promise.all([page.waitForLoadState('networkidle').catch(() => {}), clickLoginImage(frame)]);
   await page.waitForTimeout(3500);
 
-  // 未登録デバイスではシリアル(KEYNO)セットアップ画面になる
   frame = page.frame({ name: 'loginFRAME' }) || frame;
   const keyno = await frame.$('input[name="KEYNO"]').catch(() => null);
   if (keyno) {
     if (!process.env.SERIAL_NO) throw new Error('シリアル入力が要求されましたが SERIAL_NO が未設定です');
-    console.log('    シリアル(KEYNO)で突破');
+    console.log('    シリアル(KEYNO)でデバイス登録');
     await frame.fill('input[name="PASSWD_D"]', process.env.LOGIN_PASSWORD).catch(() => {});
     await frame.fill('input[name="KEYNO"]', process.env.SERIAL_NO);
     await Promise.all([page.waitForLoadState('networkidle').catch(() => {}), clickLoginImage(frame)]);
     await page.waitForTimeout(3500);
+    return true; // セットアップした＝再ログインが必要
+  }
+  return false;
+}
+
+async function seinoLogin(page) {
+  // 1回目: 未登録デバイスはここでシリアル登録される（その直後セッションは未ログイン扱い）
+  const didSetup = await attemptLogin(page);
+  if (didSetup) {
+    // デバイス登録後は「もう一度ログイン」が必要。今度はcookieで認識され KEYNO は出ない
+    console.log('    デバイス登録後の再ログイン');
+    await attemptLogin(page);
   }
 }
 
@@ -48,26 +60,46 @@ async function seinoLogin(page) {
   if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
   const launchArgs = process.env.PW_NO_SANDBOX === '1' ? ['--no-sandbox', '--disable-dev-shm-usage'] : [];
   const browser = await chromium.launch({ headless: process.env.HEADLESS !== 'false', args: launchArgs });
+  let context, page;
   try {
-    const context = await browser.newContext({ acceptDownloads: true });
-    const page = await context.newPage();
+    context = await browser.newContext({ acceptDownloads: true });
+    page = await context.newPage();
     page.on('dialog', async d => { console.log('[DIALOG]', d.message()); await d.accept().catch(() => {}); });
 
     console.log('[1] ログイン');
     await seinoLogin(page);
 
-    console.log('[2] 仕分コードデータDLページを直接開く');
-    // メニューの openNewWindow('announce.do?...') 相当を、同一セッションの新ページで直接開く。
-    // announce.do は act.seino.co.jp/kmd/MasterDataDownload.do へリダイレクトする。
-    const ANNOUNCE_URL = process.env.SEINO_ANNOUNCE_URL
-      || 'https://net.seino.co.jp/ninsyo/announce.do?action=&displayType=2&PROJECTID=K1859401';
-    const dl = await context.newPage();
-    await dl.goto(ANNOUNCE_URL, { waitUntil: 'domcontentloaded' });
-    for (let i = 0; i < 15 && !/MasterDataDownload|\/kmd\//i.test(dl.url()); i++) {
-      await dl.waitForTimeout(1000);
+    console.log('[2] 仕分コードデータDLページを開く（メニュー文脈でopenNewWindow）');
+    // 実ユーザーと同じく、メニューページのJS文脈で openNewWindow を呼んで子ウィンドウで開く。
+    // （直接gotoだとセッション受け渡しが切れて認証エラーになるため）
+    const PROJECT_URL = process.env.SEINO_PROJECT_URL
+      || 'announce.do?action=&displayType=2&PROJECTID=K1859401';
+    const popupPromise = context.waitForEvent('page', { timeout: 20000 }).catch(() => null);
+    let invoked = false;
+    for (const f of page.frames()) {
+      const ok = await f.evaluate((u) => {
+        if (typeof openNewWindow === 'function') { openNewWindow(u, 'K1859401'); return true; }
+        return false;
+      }, PROJECT_URL).catch(() => false);
+      if (ok) { invoked = true; break; }
     }
-    if (!/MasterDataDownload|\/kmd\//i.test(dl.url())) {
-      throw new Error('MasterDataDownload へ遷移しませんでした: ' + dl.url());
+    if (!invoked) throw new Error('openNewWindow がどのフレームにも見つかりません');
+
+    let dl = await popupPromise;
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(1000);
+      const found = context.pages().find(p => /MasterDataDownload|\/kmd\//i.test(p.url()));
+      if (found) { dl = found; break; }
+    }
+    if (!dl || !/MasterDataDownload|\/kmd\//i.test(dl.url())) {
+      if (dl) {
+        const txt = await dl.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 400)).catch(() => '');
+        console.log('[診断] 遷移先URL:', dl.url());
+        console.log('[診断] TEXT:', txt);
+      }
+      // ログイン後メニューのURLも確認
+      console.log('[診断] メインページURL:', page.url());
+      throw new Error('MasterDataDownload へ遷移しませんでした: ' + (dl && dl.url()));
     }
     await dl.waitForLoadState('domcontentloaded').catch(() => {});
     await dl.waitForTimeout(2000);
@@ -99,6 +131,25 @@ async function seinoLogin(page) {
     }
     console.log(`[完了] ${saved.length}/${TARGETS.length} 件 取得`);
   } finally {
+    // セッションを溜めないため、成功/失敗どちらでも必ずログアウトする
+    if (context && page) {
+      try {
+        console.log('[*] ログアウト（セッション終了）');
+        // メインページの「ログアウト」リンクを押す
+        for (const f of page.frames()) {
+          await f.evaluate(() => {
+            const a = [...document.querySelectorAll('a,[onclick]')].find(x =>
+              /ログアウト|logout/i.test((x.innerText || '') + (x.getAttribute('onclick') || '') + (x.getAttribute('href') || '')));
+            if (a) a.click();
+          }).catch(() => {});
+        }
+        await page.waitForTimeout(2000);
+        // act側セッションも明示終了
+        const p = await context.newPage();
+        await p.goto('https://act.seino.co.jp/ninsyo/sessionEnd.do', { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await p.waitForTimeout(1500);
+      } catch (e) { console.log('    ログアウト処理でエラー（無視）:', e.message); }
+    }
     await browser.close();
   }
 })().catch(err => { console.error('!! エラー:', err.message); process.exit(1); });
