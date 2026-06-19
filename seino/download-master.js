@@ -2,6 +2,7 @@
 // ログイン → (必要ならシリアルKEYNO) → 仕分コードデータDLページ → 対象2ファイルDL
 const path = require('path');
 const fs = require('fs');
+const AdmZip = require('adm-zip');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { chromium } = require('playwright');
 
@@ -125,8 +126,20 @@ async function seinoLogin(page) {
       const savePath = path.join(DOWNLOAD_DIR, fn);
       await download.saveAs(savePath);
       const kb = (fs.statSync(savePath).size / 1024).toFixed(1);
-      console.log(`    ✓ ${fn} (${kb} KB) -> ${savePath}`);
-      saved.push({ fn, savePath, kb });
+      console.log(`    ✓ ${fn} (${kb} KB)`);
+
+      // zipを解凍（中の.txtを保存先に展開）→ zip本体は削除
+      try {
+        const zip = new AdmZip(savePath);
+        const entries = zip.getEntries().map(e => e.entryName);
+        zip.extractAllTo(DOWNLOAD_DIR, true); // 既存は上書き
+        fs.unlinkSync(savePath);
+        console.log(`      解凍 -> ${entries.join(', ')}（zip削除）`);
+        saved.push({ fn, extracted: entries });
+      } catch (e) {
+        console.log('      !! 解凍失敗（zipは残す）:', e.message);
+        saved.push({ fn, extracted: [] });
+      }
       await dl.waitForTimeout(1500);
     }
     console.log(`[完了] ${saved.length}/${TARGETS.length} 件 取得`);
